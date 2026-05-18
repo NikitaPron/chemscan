@@ -16,13 +16,18 @@ st.set_page_config(
 def load_data():
     try:
         df = pd.read_csv("table_drugs.csv", decimal=',')
-        numeric_columns = ['acd_most_apka', 'acd_most_bpka', 'pka exp', 'pka exp 2', 
-                          'LogP', 'LogP_exp', 'dyeles_score', 'first_approval', 'oral']
+        # Обновленные названия колонок
+        numeric_columns = ['pKa (basic)', 'pKa (acidic)', 'pKa (exp.)_1', 'pKa (exp.)_2', 
+                          'logP (pred.)', 'logP (exp.)', 'DyeLeS score', 'First approval (year)', 'Oral']
         
         for col in numeric_columns:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.replace(',', '.').str.replace(' ', '')
                 df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Переименовываем колонку Fluorescent для удобства
+        if 'Fluorescent' in df.columns:
+            df['is_fluorescent'] = df['Fluorescent'].apply(lambda x: True if str(x).lower() in ['true', '1', 'yes', '+'] else False if str(x).lower() in ['false', '0', 'no', '-'] else None)
         
         return df
     except Exception as e:
@@ -78,7 +83,7 @@ def get_molecule_image(smiles, size=(400, 400)):
         img.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode()
         
-        return f'<img src="data:image/png;base64,{img_str}" style="max-width: 400px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">'
+        return f'<img src="data:image/png;base64,{img_str}" style="width: 100%; max-width: 400px; height: auto; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">'
     except Exception as e:
         return None
 
@@ -120,7 +125,7 @@ def main():
         return
     
     atc_code_col = None
-    for col in ['atc_code', 'ATC Code', 'atc_therapeutic_group']:
+    for col in ['ATC code(s)', 'ATC Code', 'atc_code']:
         if col in df.columns:
             atc_code_col = col
             break
@@ -140,13 +145,13 @@ def main():
     )
     
     if value_type == "Predicted":
-        bpka_col = 'acd_most_bpka'
-        apka_col = 'acd_most_apka'
-        logp_col = 'LogP'
+        bpka_col = 'pKa (basic)'
+        apka_col = 'pKa (acidic)'
+        logp_col = 'logP (pred.)'
     else:
-        bpka_col = 'pka exp'
-        apka_col = 'pka exp 2'
-        logp_col = 'LogP_exp'
+        bpka_col = 'pKa (exp.)_1'
+        apka_col = 'pKa (exp.)_2'
+        logp_col = 'logP (exp.)'
     
     st.sidebar.subheader("⚗️ pKa параметры")
     
@@ -265,10 +270,10 @@ def main():
     filtered_df = df.copy()
     
     if enable_bpka_filter and bpka_col in filtered_df.columns:
-       if value_type == "Experimental" and 'pka exp' in filtered_df.columns and 'pka exp 2' in filtered_df.columns:
+       if value_type == "Experimental" and 'pKa (exp.)_1' in filtered_df.columns and 'pKa (exp.)_2' in filtered_df.columns:
            mask_bpka = (
-               (filtered_df['pka exp'].between(basic_pka_min, basic_pka_max)) |    
-               (filtered_df['pka exp 2'].between(basic_pka_min, basic_pka_max))    
+               (filtered_df['pKa (exp.)_1'].between(basic_pka_min, basic_pka_max)) |    
+               (filtered_df['pKa (exp.)_2'].between(basic_pka_min, basic_pka_max))    
            )
            filtered_df = filtered_df[mask_bpka]
        else:
@@ -309,8 +314,8 @@ def main():
         
         filtered_df = filtered_df[mask_atc]
     
-    if 'oral' in filtered_df.columns and oral_only:
-        filtered_df = filtered_df[filtered_df['oral'] == 1.0]
+    if 'Oral' in filtered_df.columns and oral_only:
+        filtered_df = filtered_df[filtered_df['Oral'] == 1.0]
     
     if bpka_col in filtered_df.columns:
         filtered_df['_has_bpka'] = filtered_df[bpka_col].notna()
@@ -343,8 +348,10 @@ def main():
             for idx in range(display_count):
                 row = filtered_df.iloc[idx]
                 
+                # Используем контейнер с фиксированной структурой
                 with st.container():
-                    col1, col2 = st.columns([1, 2])
+                    # Создаем две колонки с пропорцией 1:2, но с responsive дизайном
+                    col1, col2 = st.columns([1, 2], gap="medium")
                     
                     with col1:
                         if 'SMILES' in row and pd.notna(row['SMILES']):
@@ -357,32 +364,55 @@ def main():
                             st.info("SMILES не доступен")
                     
                     with col2:
+                        # Добавляем отступ сверху для лучшего выравнивания
                         st.markdown(f"**{row.get('Name', 'N/A')}**")
-                        atc_display = row.get(atc_code_col, 'N/A') if atc_code_col else row.get('atc_therapeutic_group', 'N/A')
-                        st.caption(f"ATX: {atc_display}")
+                        atc_display = row.get(atc_code_col, 'N/A') if atc_code_col else row.get('ATC therapeutic group', 'N/A')
+                        st.caption(f"АТХ: {atc_display}")
                         
-                        if pd.notna(row.get(bpka_col)):
-                            st.write(f"**Basic pKa:** {float(row.get(bpka_col)):.2f}")
-                        else:
-                            st.markdown('<span style="color: red;">**Basic pKa:** Unknown</span>', unsafe_allow_html=True)
-                        if pd.notna(row.get(apka_col)):
-                            st.write(f"**Acid pKa:** {float(row.get(apka_col)):.2f}")
-                        else:
-                            st.markdown('<span style="color: red;">**Acid pKa:** Unknown</span>', unsafe_allow_html=True)
-                        if pd.notna(row.get(logp_col)):
-                            st.write(f"**LogP:** {float(row.get(logp_col)):.2f}")
+                        # Используем колонки для компактного отображения параметров
+                        param_col1, param_col2 = st.columns(2)
                         
-                        if 'pka exp' in row and pd.notna(row['pka_comment']):
-                            st.write(f"**pKa (exp):** {row['pka_comment']}")
-                        if 'LogP_exp' in row and pd.notna(row['LogP_exp']):
-                            st.write(f"**LogP (exp):** {float(row['LogP_exp']):.2f}")
+                        with param_col1:
+                            if pd.notna(row.get(bpka_col)):
+                                st.write(f"**Basic pKa:** {float(row.get(bpka_col)):.2f}")
+                            else:
+                                st.markdown('<span style="color: red;">**Basic pKa:** Unknown</span>', unsafe_allow_html=True)
+                            
+                            if pd.notna(row.get(apka_col)):
+                                st.write(f"**Acid pKa:** {float(row.get(apka_col)):.2f}")
+                            else:
+                                st.markdown('<span style="color: red;">**Acid pKa:** Unknown</span>', unsafe_allow_html=True)
                         
-                        if 'is_fluorescent' in row:
-                            st.write(f"**Флуоресцентный:** {'✅ Да' if row['is_fluorescent'] else '❌ Нет'}")
+                        with param_col2:
+                            if pd.notna(row.get(logp_col)):
+                                st.write(f"**LogP:** {float(row.get(logp_col)):.2f}")
+                            
+                            if 'is_fluorescent' in row:
+                                st.write(f"**Флуоресцентный:** {'✅ Да' if row['is_fluorescent'] else '❌ Нет'}")
+                        
+                        # Экспериментальные данные в выпадающем блоке
+                        if any([pd.notna(row.get('pKa (exp.)_1')), pd.notna(row.get('pKa (exp.)_2')), 
+                                pd.notna(row.get('pKa_comment')), pd.notna(row.get('logP (exp.)'))]):
+                            with st.expander("📊 Экспериментальные данные"):
+                                if pd.notna(row.get('pKa (exp.)_1')):
+                                    st.write(f"**pKa (exp.) 1:** {float(row.get('pKa (exp.)_1')):.2f}")
+                                if pd.notna(row.get('pKa (exp.)_2')):
+                                    st.write(f"**pKa (exp.) 2:** {float(row.get('pKa (exp.)_2')):.2f}")
+                                if pd.notna(row.get('pKa_comment')):
+                                    st.write(f"**pKa comment:** {row['pKa_comment']}")
+                                if pd.notna(row.get('logP (exp.)')):
+                                    st.write(f"**LogP (exp.):** {float(row.get('logP (exp.)')):.2f}")
+                        
+                        if 'First approval (year)' in row and pd.notna(row['First approval (year)']):
+                            st.caption(f"📅 Одобрен: {int(row['First approval (year)'])} г.")
                         
                         if 'SMILES' in row and pd.notna(row['SMILES']):
-                            with st.expander("SMILES"):
+                            with st.expander("🔬 SMILES и идентификаторы"):
                                 st.code(row['SMILES'])
+                                if 'ChEMBL ID' in row and pd.notna(row['ChEMBL ID']):
+                                    st.write(f"**ChEMBL ID:** {row['ChEMBL ID']}")
+                                if 'DrugBank ID' in row and pd.notna(row['DrugBank ID']):
+                                    st.write(f"**DrugBank ID:** {row['DrugBank ID']}")
                     
                     st.divider()
             
@@ -422,7 +452,17 @@ def main():
                     st.altair_chart(hist_chart, use_container_width=True)
                 st.caption(f"Среднее: {filtered_df[logp_col].mean():.2f}, Медиана: {filtered_df[logp_col].median():.2f}")
             
-            display_atc_col = atc_code_col if atc_code_col else 'atc_therapeutic_group'
+            # Показываем распределение по флуоресценции
+            if 'is_fluorescent' in filtered_df.columns:
+                st.write("**Распределение по флуоресценции**")
+                fluo_counts = filtered_df['is_fluorescent'].value_counts()
+                fluo_df = pd.DataFrame({
+                    'Тип': ['Флуоресцентные', 'Не флуоресцентные'],
+                    'Количество': [fluo_counts.get(True, 0), fluo_counts.get(False, 0)]
+                })
+                st.bar_chart(fluo_df.set_index('Тип'), use_container_width=True)
+            
+            display_atc_col = atc_code_col if atc_code_col else 'ATC therapeutic group'
             if display_atc_col in filtered_df.columns:
                 st.write("**Распределение по АТХ группам**")
                 atc_counts = filtered_df[display_atc_col].value_counts().head(10)
@@ -430,7 +470,7 @@ def main():
             
             st.write("**📊 Сводная статистика**")
             
-            numeric_cols = [bpka_col, apka_col, logp_col, 'dyeles_score']
+            numeric_cols = [bpka_col, apka_col, logp_col, 'DyeLeS score', 'First approval (year)']
             available_numeric_cols = [col for col in numeric_cols if col in filtered_df.columns and not filtered_df[col].isna().all()]
             
             if available_numeric_cols:
@@ -452,15 +492,17 @@ def main():
             show_exp = st.checkbox("Показать экспериментальные значения", value=True)
             show_atc_levels = st.checkbox("Показать уровни АТХ", value=False)
             
-            table_columns = ['Name', display_atc_col, bpka_col, apka_col, logp_col, 'dyeles_score', 'is_fluorescent', 'oral', 'first_approval']
+            table_columns = ['Name', display_atc_col, bpka_col, apka_col, logp_col, 'DyeLeS score', 'is_fluorescent', 'Oral', 'First approval (year)']
             
             if show_exp:
-                if 'pka exp' in filtered_df.columns:
-                    table_columns.append('pka exp')
-                if 'pka exp 2' in filtered_df.columns:
-                    table_columns.append('pka exp 2')
-                if 'LogP_exp' in filtered_df.columns:
-                    table_columns.append('LogP_exp')
+                if 'pKa (exp.)_1' in filtered_df.columns:
+                    table_columns.append('pKa (exp.)_1')
+                if 'pKa (exp.)_2' in filtered_df.columns:
+                    table_columns.append('pKa (exp.)_2')
+                if 'pKa_comment' in filtered_df.columns:
+                    table_columns.append('pKa_comment')
+                if 'logP (exp.)' in filtered_df.columns:
+                    table_columns.append('logP (exp.)')
             
             if show_atc_levels and '_atc_l1' in filtered_df.columns:
                 table_columns.extend(['_atc_l1', '_atc_l2', '_atc_l3'])
@@ -469,7 +511,7 @@ def main():
                 table_columns.append('SMILES')
             
             if show_ids:
-                id_columns = ['molecule_chembl_id', 'DrugBank ID', 'CAS Number', 'PubChem Compound ID']
+                id_columns = ['ChEMBL ID', 'DrugBank ID', 'ligand_IPTM']
                 table_columns.extend([col for col in id_columns if col in filtered_df.columns])
             
             table_columns = [col for col in table_columns if col in filtered_df.columns]
@@ -490,7 +532,7 @@ def main():
     
     Платформа ChemScan разработана для поддержки принятия решений при выборе лекарственных препаратов не только для тромбоцитарной доставки, но и для широкого спектра стратегий таргетной терапии. Система позволяет моделировать накопление соединений в различных кислых субклеточных компартментах (таких как лизосомы, эндосомы или митохондрии) разных типов клеток, используя физико-химические параметры (pKa, logP) и механизмы ионного захвата.
     
-    **Контакты:** nick-pronn@yandex.ru | **Версия:** 1.1
+    **Контакты:** nick-pronn@yandex.ru | **Версия:** 1.0
     """)
 
 if __name__ == "__main__":
