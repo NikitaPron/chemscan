@@ -28,7 +28,7 @@ cd chemscan
 
 # 2. Создайте виртуальное окружение
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: .\venv\Scripts\Activate.ps1
 
 # 3. Установите зависимости
 pip install -r requirements.txt
