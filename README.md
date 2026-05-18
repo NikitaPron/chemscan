@@ -23,7 +23,7 @@
 
 ```bash
 # 1. Клонируйте репозиторий
-git clone https://github.com/your-username/chemscan.git
+git clone https://github.com/NikitaPron/chemscan.git
 cd chemscan
 
 # 2. Создайте виртуальное окружение
