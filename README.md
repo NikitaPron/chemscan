@@ -1,41 +1,40 @@
 # 🔬 ChemScan
 
-> Платформа для скрининга лекарственных средств по критериям субклеточного накопления и таргетной доставки
+> A computational platform for drug screening based on subcellular accumulation and targeted delivery criteria
 
-## 🎯 О проекте
+## 🎯 About the Project
 
-**ChemScan** — вычислительная платформа для отбора одобренных лекарственных препаратов на основе их физико-химических свойств, пригодных для накопления в кислых субклеточных компартментах (лизосомы, эндосомы, гранулы тромбоцитов) через механизм ионного захвата.
+**ChemScan** is a computational platform for selecting approved drugs based on their physicochemical properties suitable for accumulation in acidic subcellular compartments (lysosomes, endosomes, platelet granules) through ion trapping.
 
-### 🔑 Ключевые возможности
+### 🔑 Key Features
 
-- ✅ Фильтрация по **Basic pKa** (рекомендуемый диапазон: 8–12)
-- ✅ Фильтрация по **Acid pKa** и **LogP**
-- ✅ Поддержка расчётных и экспериментальных значений
-- ✅ Каскадная фильтрация по **АТХ-классификации** (3 уровня)
-- ✅ Оценка флуоресцентных свойств через **DyeLeS score**
-- ✅ Визуализация молекулярных структур (RDKit)
-- ✅ Экспорт результатов в CSV
-- ✅ Интерактивные гистограммы и статистика
+- ✅ **Basic pKa** filtering (recommended range: 8–12)
+- ✅ **Acid pKa** and **LogP** filtering
+- ✅ Support for calculated and experimental values
+- ✅ Cascade filtering by **ATC classification** (3 levels)
+- ✅ Fluorescence property assessment via **DyeLeS score**
+- ✅ Molecular structure visualization (RDKit)
+- ✅ CSV export of results
+- ✅ Interactive histograms and statistics
 
-## 🚀 Быстрый старт
+## 🚀 Quick Start
 
-### Локальный запуск
+### Local Launch
 
 ```bash
-# 1. Клонируйте репозиторий
+# 1. Clone the repository
 git clone https://github.com/NikitaPron/chemscan.git
 cd chemscan
 
-# 2. Создайте виртуальное окружение
+# 2. Create a virtual environment
 python -m venv venv
 source venv/bin/activate  # Windows: .\venv\Scripts\Activate.ps1
 
-# 3. Установите зависимости
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Подготовьте данные
-# Поместите файл table_drugs.csv в корень проекта
+# 4. Prepare data
+# Place the table_drugs.csv file in the project root
 
-# 5. Запустите приложение
+# 5. Run the application
 streamlit run app.py
-```
