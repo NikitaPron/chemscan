@@ -399,16 +399,29 @@ def main():
     if 'Oral' in filtered_df.columns and oral_only:
         filtered_df = filtered_df[filtered_df['Oral'] == 1.0]
     
+    exp_signal_cols = [
+        col for col in ['pKa_comment']
+        if col in filtered_df.columns
+    ]
+    if exp_signal_cols:
+        filtered_df['_has_exp_data'] = False
+        for col in exp_signal_cols:
+            filtered_df['_has_exp_data'] |= filtered_df[col].notna()
+    else:
+        filtered_df['_has_exp_data'] = False
+
+    sort_cols = ['_has_exp_data']
     if is_experimental and exp_pka_cols:
         filtered_df['_has_pka'] = False
         for col in exp_pka_cols:
             filtered_df['_has_pka'] |= filtered_df[col].notna()
-        filtered_df = filtered_df.sort_values(by=['_has_pka'], ascending=False)
-        filtered_df = filtered_df.drop(columns=['_has_pka'])
-    elif not is_experimental and bpka_col in filtered_df.columns:
-        filtered_df['_has_bpka'] = filtered_df[bpka_col].notna()
-        filtered_df = filtered_df.sort_values(by=['_has_bpka'], ascending=False)
-        filtered_df = filtered_df.drop(columns=['_has_bpka'])
+        sort_cols.append('_has_pka')
+    elif (not is_experimental) and ('pKa (basic)' in filtered_df.columns):
+        filtered_df['_has_bpka'] = filtered_df['pKa (basic)'].notna()
+        sort_cols.append('_has_bpka')
+
+    filtered_df = filtered_df.sort_values(by=sort_cols, ascending=[False] * len(sort_cols), kind='mergesort')
+    filtered_df = filtered_df.drop(columns=[c for c in ['_has_exp_data', '_has_pka', '_has_bpka'] if c in filtered_df.columns])
     
     st.header("📊 Search Results")
     
