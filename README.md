@@ -40,7 +40,7 @@ The ChemScan database contains **2,063 unique approved small-molecule drugs** as
 | `ABCB1_Pgp_CHEMBL` | Curated ChEMBL bioactivity records against human ABCB1 (CHEMBL4302) |
 | ATC codes, oral flag, first-approval year | Repository metadata |
 
-Experimental coverage in the current snapshot: predicted basic pKa and logP for all retained compounds; experimental pKa for ~21% and experimental logP for ~52% of entries.
+Experimental coverage in the current snapshot: predicted basic pKa, acidic pKa, and logP for all retained compounds; experimental pKa for ~21% and experimental logP for ~52% of entries.
 
 The main screening table is `table_drugs.csv` in the project root. The Streamlit app loads this file at startup. Where available, `ABCB1_Pgp_CHEMBL` entries are curated experimental bioactivity annotations imported from ChEMBL (not model-predicted values).
 
