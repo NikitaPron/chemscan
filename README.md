@@ -42,7 +42,7 @@ The ChemScan database contains **2,063 unique approved small-molecule drugs** as
 
 Experimental coverage in the current snapshot: predicted basic pKa and logP for all retained compounds; experimental pKa for ~21% and experimental logP for ~52% of entries.
 
-The main screening table is `table_drugs.csv` in the project root. The Streamlit app loads this file at startup. ABCB1 annotations are distributed as precomputed values in this file.
+The main screening table is `table_drugs.csv` in the project root. The Streamlit app loads this file at startup. Where available, `ABCB1_Pgp_CHEMBL` entries are curated experimental bioactivity annotations imported from ChEMBL (not model-predicted values).
 
 ### Recent platform updates (post peer review)
 
