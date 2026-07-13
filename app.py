@@ -20,43 +20,10 @@ LIPINSKI_LIMITS = {
     'TPSA': 140.0,
 }
 
-@st.cache_data
-def compute_hbd_hba_from_smiles(smiles_values):
-    from rdkit import Chem
-    from rdkit.Chem import Lipinski
-
-    hbd_values = []
-    hba_values = []
-    for smiles in smiles_values:
-        if pd.isna(smiles) or smiles == '' or str(smiles) == 'nan':
-            hbd_values.append(np.nan)
-            hba_values.append(np.nan)
-            continue
-        mol = Chem.MolFromSmiles(str(smiles))
-        if mol is None:
-            hbd_values.append(np.nan)
-            hba_values.append(np.nan)
-            continue
-        hbd_values.append(int(Lipinski.NumHDonors(mol)))
-        hba_values.append(int(Lipinski.NumHAcceptors(mol)))
-    return hbd_values, hba_values
-
-def add_lipinski_columns(df):
-    if 'SMILES' not in df.columns:
-        return df
-
-    hbd_values, hba_values = compute_hbd_hba_from_smiles(tuple(df['SMILES'].tolist()))
-    df['HBD'] = hbd_values
-    df['HBA'] = hba_values
-
-    violations = pd.Series(0, index=df.index, dtype=int)
-    for col, limit in LIPINSKI_LIMITS.items():
-        if col not in df.columns:
-            continue
-        violations += (df[col].notna() & (df[col] > limit)).astype(int)
-    df['lipinski_violations'] = violations
-    df['lipinski_pass'] = violations <= 1
-    return df
+def parse_bool(value):
+    if pd.isna(value):
+        return None
+    return str(value).lower() in ['true', '1', 'yes', '+']
 
 @st.cache_data
 def load_data():
@@ -65,7 +32,7 @@ def load_data():
         # Updated column names
         numeric_columns = ['pKa (basic)', 'pKa (acidic)', 'pKa (exp.)_1', 'pKa (exp.)_2', 
                           'logP (pred.)', 'logP (exp.)', 'DyeLeS score', 'First approval (year)', 'Oral',
-                          'MW', 'TPSA']
+                          'MW', 'TPSA', 'HBD', 'HBA', 'lipinski_violations']
         
         for col in numeric_columns:
             if col in df.columns:
@@ -74,9 +41,10 @@ def load_data():
         
         # Renaming Fluorescent column for convenience
         if 'Fluorescent' in df.columns:
-            df['is_fluorescent'] = df['Fluorescent'].apply(lambda x: True if str(x).lower() in ['true', '1', 'yes', '+'] else False if str(x).lower() in ['false', '0', 'no', '-'] else None)
+            df['is_fluorescent'] = df['Fluorescent'].apply(parse_bool)
 
-        df = add_lipinski_columns(df)
+        if 'lipinski_pass' in df.columns:
+            df['lipinski_pass'] = df['lipinski_pass'].apply(parse_bool)
         
         return df
     except Exception as e:
@@ -642,6 +610,11 @@ def main():
                                 st.markdown('<span style="color: red;">**LogP (exp.):** —</span>', unsafe_allow_html=True)
                             if 'is_fluorescent' in row:
                                 st.write(f"**Fluorescent:** {'✅ Yes' if row['is_fluorescent'] else '❌ No'}")
+                            if 'Oral' in row:
+                                if pd.notna(row.get('Oral')):
+                                    st.write(f"**Oral:** {'✅ Yes' if row['Oral'] == 1.0 else '❌ No'}")
+                                else:
+                                    st.markdown('<span style="color: red;">**Oral:** —</span>', unsafe_allow_html=True)
                         
                         lipinski_parts = []
                         if pd.notna(row.get('MW')):
