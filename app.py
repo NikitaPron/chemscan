@@ -12,13 +12,60 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+LIPINSKI_LIMITS = {
+    'MW': 500.0,
+    'logP (pred.)': 5.0,
+    'HBD': 5,
+    'HBA': 10,
+    'TPSA': 140.0,
+}
+
+@st.cache_data
+def compute_hbd_hba_from_smiles(smiles_values):
+    from rdkit import Chem
+    from rdkit.Chem import Lipinski
+
+    hbd_values = []
+    hba_values = []
+    for smiles in smiles_values:
+        if pd.isna(smiles) or smiles == '' or str(smiles) == 'nan':
+            hbd_values.append(np.nan)
+            hba_values.append(np.nan)
+            continue
+        mol = Chem.MolFromSmiles(str(smiles))
+        if mol is None:
+            hbd_values.append(np.nan)
+            hba_values.append(np.nan)
+            continue
+        hbd_values.append(int(Lipinski.NumHDonors(mol)))
+        hba_values.append(int(Lipinski.NumHAcceptors(mol)))
+    return hbd_values, hba_values
+
+def add_lipinski_columns(df):
+    if 'SMILES' not in df.columns:
+        return df
+
+    hbd_values, hba_values = compute_hbd_hba_from_smiles(tuple(df['SMILES'].tolist()))
+    df['HBD'] = hbd_values
+    df['HBA'] = hba_values
+
+    violations = pd.Series(0, index=df.index, dtype=int)
+    for col, limit in LIPINSKI_LIMITS.items():
+        if col not in df.columns:
+            continue
+        violations += (df[col].notna() & (df[col] > limit)).astype(int)
+    df['lipinski_violations'] = violations
+    df['lipinski_pass'] = violations <= 1
+    return df
+
 @st.cache_data
 def load_data():
     try:
         df = pd.read_csv("table_drugs.csv", decimal=',')
         # Updated column names
         numeric_columns = ['pKa (basic)', 'pKa (acidic)', 'pKa (exp.)_1', 'pKa (exp.)_2', 
-                          'logP (pred.)', 'logP (exp.)', 'DyeLeS score', 'First approval (year)', 'Oral']
+                          'logP (pred.)', 'logP (exp.)', 'DyeLeS score', 'First approval (year)', 'Oral',
+                          'MW', 'TPSA']
         
         for col in numeric_columns:
             if col in df.columns:
@@ -28,11 +75,19 @@ def load_data():
         # Renaming Fluorescent column for convenience
         if 'Fluorescent' in df.columns:
             df['is_fluorescent'] = df['Fluorescent'].apply(lambda x: True if str(x).lower() in ['true', '1', 'yes', '+'] else False if str(x).lower() in ['false', '0', 'no', '-'] else None)
+
+        df = add_lipinski_columns(df)
         
         return df
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return pd.DataFrame()
+
+def apply_optional_range_filter(df, column, enabled, value_min, value_max):
+    if not enabled or column not in df.columns:
+        return df
+    mask = df[column].isna() | df[column].between(value_min, value_max)
+    return df[mask]
 
 def get_download_link(df, filename="chemscan_results.csv"):
     csv = df.to_csv(index=False, encoding='utf-8-sig')
@@ -190,7 +245,7 @@ def main():
     value_type = st.sidebar.radio(
         "Select value type:",
         ["Predicted", "Experimental"],
-        help="Predicted values obtained via ACD/Labs, experimental values from literature"
+        help="Predicted values obtained via Chemaxon, experimental values from literature"
     )
     
     is_experimental = value_type == "Experimental"
@@ -347,6 +402,79 @@ def main():
     
     st.sidebar.subheader("💊 Administration")
     oral_only = st.sidebar.checkbox("Oral drugs only", value=False)
+
+    lipinski_col = 'logP (pred.)'
+    lipinski_filters = {
+        'MW': {'enabled': False, 'min': 0.0, 'max': 5000.0},
+        lipinski_col: {'enabled': False, 'min': -10.0, 'max': 10.0},
+        'HBD': {'enabled': False, 'min': 0, 'max': 50},
+        'HBA': {'enabled': False, 'min': 0, 'max': 50},
+        'TPSA': {'enabled': False, 'min': 0.0, 'max': 2000.0},
+    }
+
+    with st.sidebar.expander("📐 Lipinski-like (optional)", expanded=False):
+        st.caption(
+            "Rule of Five: MW ≤ 500, LogP ≤ 5, HBD ≤ 5, HBA ≤ 10, TPSA ≤ 140 Å². "
+            "Sliders default to these limits when enabled."
+        )
+
+        lipinski_specs = [
+            ('MW', 'MW range (Da)', 'Molecular weight', 1.0),
+            (lipinski_col, 'LogP range (predicted)', 'Lipinski uses predicted LogP', 0.1),
+            ('HBD', 'H-bond donors', 'NumHDonors (RDKit)', 1.0),
+            ('HBA', 'H-bond acceptors', 'NumHAcceptors (RDKit)', 1.0),
+            ('TPSA', 'TPSA range (Å²)', 'Topological polar surface area', 1.0),
+        ]
+
+        for col, label, help_text, step in lipinski_specs:
+            if col not in df.columns or df[col].isna().all():
+                st.warning(f"No {col} data available")
+                continue
+
+            col_min = float(df[col].min())
+            col_max = float(df[col].max())
+            lipinski_max = float(LIPINSKI_LIMITS[col])
+            default_max = min(lipinski_max, col_max)
+            default_min = col_min
+
+            lipinski_filters[col]['enabled'] = st.checkbox(
+                f"Enable {label.split('(')[0].strip()} filter",
+                value=False,
+                key=f"enable_lipinski_{col}",
+            )
+
+            if lipinski_filters[col]['enabled']:
+                if col in ('HBD', 'HBA'):
+                    slider_min = int(col_min)
+                    slider_max = int(col_max)
+                    default_min_i = int(default_min)
+                    default_max_i = int(default_max)
+                    selected = st.slider(
+                        label,
+                        min_value=slider_min,
+                        max_value=slider_max,
+                        value=(default_min_i, default_max_i),
+                        step=int(step),
+                        help=help_text,
+                        key=f"lipinski_slider_{col}",
+                    )
+                    lipinski_filters[col]['min'] = float(selected[0])
+                    lipinski_filters[col]['max'] = float(selected[1])
+                else:
+                    selected = st.slider(
+                        label,
+                        min_value=col_min,
+                        max_value=col_max,
+                        value=(default_min, default_max),
+                        step=step,
+                        help=help_text,
+                        key=f"lipinski_slider_{col}",
+                    )
+                    lipinski_filters[col]['min'] = selected[0]
+                    lipinski_filters[col]['max'] = selected[1]
+            else:
+                lipinski_filters[col]['min'] = col_min
+                lipinski_filters[col]['max'] = col_max
     
     filtered_df = df.copy()
     
@@ -398,6 +526,15 @@ def main():
     
     if 'Oral' in filtered_df.columns and oral_only:
         filtered_df = filtered_df[filtered_df['Oral'] == 1.0]
+
+    for col, settings in lipinski_filters.items():
+        filtered_df = apply_optional_range_filter(
+            filtered_df,
+            col,
+            settings['enabled'],
+            settings['min'],
+            settings['max'],
+        )
     
     exp_signal_cols = [
         col for col in ['pKa_comment']
@@ -473,7 +610,7 @@ def main():
                         param_col1, param_col2 = st.columns(2)
                         
                         with param_col1:
-                            st.caption("Predicted (ACD/Labs)")
+                            st.caption("Predicted (Chemaxon)")
                             if pd.notna(row.get('pKa (basic)')):
                                 st.write(f"**Basic pKa:** {float(row.get('pKa (basic)')):.2f}")
                             else:
@@ -506,6 +643,22 @@ def main():
                             if 'is_fluorescent' in row:
                                 st.write(f"**Fluorescent:** {'✅ Yes' if row['is_fluorescent'] else '❌ No'}")
                         
+                        lipinski_parts = []
+                        if pd.notna(row.get('MW')):
+                            lipinski_parts.append(f"MW: {float(row['MW']):.1f}")
+                        if pd.notna(row.get('TPSA')):
+                            lipinski_parts.append(f"TPSA: {float(row['TPSA']):.1f}")
+                        if pd.notna(row.get('HBD')):
+                            lipinski_parts.append(f"HBD: {int(row['HBD'])}")
+                        if pd.notna(row.get('HBA')):
+                            lipinski_parts.append(f"HBA: {int(row['HBA'])}")
+                        if lipinski_parts:
+                            st.caption(" · ".join(lipinski_parts))
+                        if 'lipinski_violations' in row and pd.notna(row.get('lipinski_violations')):
+                            violations = int(row['lipinski_violations'])
+                            status = "✅ Lipinski-like" if violations <= 1 else f"⚠️ {violations} Ro5 violations"
+                            st.caption(status)
+
                         if 'First approval (year)' in row and pd.notna(row['First approval (year)']):
                             st.caption(f"📅 Approved: {int(row['First approval (year)'])}")
                         
@@ -548,6 +701,29 @@ def main():
             with col_logp_exp:
                 render_distribution(filtered_df, 'logP (exp.)', 'LogP (experimental)')
 
+            with st.expander("📐 Lipinski descriptors", expanded=False):
+                col_mw, col_logp_ro5, col_tpsa = st.columns(3)
+                with col_mw:
+                    render_distribution(filtered_df, 'MW', 'Molecular Weight (Da)')
+                with col_logp_ro5:
+                    render_distribution(filtered_df, 'logP (pred.)', 'LogP (predicted, Lipinski)')
+                with col_tpsa:
+                    render_distribution(filtered_df, 'TPSA', 'TPSA (Å²)')
+                col_hbd, col_hba, col_pass = st.columns(3)
+                with col_hbd:
+                    render_distribution(filtered_df, 'HBD', 'H-bond donors')
+                with col_hba:
+                    render_distribution(filtered_df, 'HBA', 'H-bond acceptors')
+                with col_pass:
+                    if 'lipinski_pass' in filtered_df.columns:
+                        st.write("**Lipinski-like (≤1 violation)**")
+                        pass_counts = filtered_df['lipinski_pass'].value_counts()
+                        pass_df = pd.DataFrame({
+                            'Status': ['Pass', 'Fail'],
+                            'Count': [pass_counts.get(True, 0), pass_counts.get(False, 0)],
+                        })
+                        st.bar_chart(pass_df.set_index('Status'), use_container_width=True)
+
             col_fluo, col_atc = st.columns(2)
             with col_fluo:
                 if 'is_fluorescent' in filtered_df.columns:
@@ -567,9 +743,9 @@ def main():
             st.write("**📊 Summary Statistics**")
             
             if is_experimental:
-                numeric_cols = exp_pka_cols + [logp_col, 'DyeLeS score', 'First approval (year)']
+                numeric_cols = exp_pka_cols + [logp_col, 'DyeLeS score', 'MW', 'TPSA', 'HBD', 'HBA', 'lipinski_violations', 'First approval (year)']
             else:
-                numeric_cols = [bpka_col, apka_col, logp_col, 'DyeLeS score', 'First approval (year)']
+                numeric_cols = [bpka_col, apka_col, logp_col, 'DyeLeS score', 'MW', 'TPSA', 'HBD', 'HBA', 'lipinski_violations', 'First approval (year)']
             available_numeric_cols = [col for col in numeric_cols if col in filtered_df.columns and not filtered_df[col].isna().all()]
             
             if available_numeric_cols:
@@ -595,13 +771,14 @@ def main():
                 show_exp = st.checkbox("Show experimental values", value=True)
             show_atc_levels = st.checkbox("Show ATC levels", value=False)
             
+            lipinski_table_cols = ['MW', 'HBD', 'HBA', 'TPSA', 'lipinski_violations', 'lipinski_pass']
             if is_experimental:
-                table_columns = ['Name', display_atc_col] + exp_pka_cols + ['pKa_comment', logp_col, 'DyeLeS score', 'is_fluorescent', 'Oral', 'First approval (year)']
+                table_columns = ['Name', display_atc_col] + exp_pka_cols + ['pKa_comment', logp_col] + lipinski_table_cols + ['DyeLeS score', 'is_fluorescent', 'Oral', 'First approval (year)']
                 if show_pred:
                     pred_columns = ['pKa (basic)', 'pKa (acidic)', 'logP (pred.)']
                     table_columns.extend(col for col in pred_columns if col in filtered_df.columns)
             else:
-                table_columns = ['Name', display_atc_col, bpka_col, apka_col, logp_col, 'DyeLeS score', 'is_fluorescent', 'Oral', 'First approval (year)']
+                table_columns = ['Name', display_atc_col, bpka_col, apka_col, logp_col] + lipinski_table_cols + ['DyeLeS score', 'is_fluorescent', 'Oral', 'First approval (year)']
                 if show_exp:
                     exp_detail_columns = ['pKa (exp.)_1', 'pKa (exp.)_2', 'pKa_comment', 'logP (exp.)']
                     table_columns.extend(
