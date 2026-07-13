@@ -13,6 +13,7 @@
 - ✅ Support for calculated and experimental values
 - ✅ Cascade filtering by **ATC classification** (3 levels)
 - ✅ Fluorescence property assessment via **DyeLeS score**
+- ✅ **Lipinski's Rule of Five** descriptors (MW, LogP, HBD, HBA, TPSA) with optional filters
 - ✅ Molecular structure visualization (RDKit)
 - ✅ CSV export of results
 - ✅ Interactive histograms and statistics
