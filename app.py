@@ -25,6 +25,24 @@ def parse_bool(value):
         return None
     return str(value).lower() in ['true', '1', 'yes', '+']
 
+def format_abcb1_annotation(annotation):
+    if pd.isna(annotation) or str(annotation).strip() == '':
+        return None
+    return str(annotation).strip()
+
+SEARCH_COLUMNS = ['Name', 'ChEMBL ID', 'DrugBank ID']
+
+def search_drugs(df, query):
+    if not query or not str(query).strip():
+        return df
+    q = str(query).strip().lower()
+    mask = pd.Series(False, index=df.index)
+    for col in SEARCH_COLUMNS:
+        if col in df.columns:
+            col_mask = df[col].astype(str).str.lower().str.contains(q, na=False, regex=False)
+            mask |= col_mask
+    return df[mask]
+
 @st.cache_data
 def load_data():
     try:
@@ -45,7 +63,7 @@ def load_data():
 
         if 'lipinski_pass' in df.columns:
             df['lipinski_pass'] = df['lipinski_pass'].apply(parse_bool)
-        
+
         return df
     except Exception as e:
         st.error(f"Error loading data: {e}")
@@ -137,6 +155,103 @@ def render_combined_pka_exp(df, columns, title):
         st.altair_chart(hist_chart, use_container_width=True)
     series = pd.Series(values)
     st.caption(f"Mean: {series.mean():.2f}, Median: {series.median():.2f}, n={len(series)}")
+
+def render_drug_card(row, atc_code_col):
+    col1, col2 = st.columns([1, 2], gap="medium")
+
+    with col1:
+        if 'SMILES' in row and pd.notna(row['SMILES']):
+            mol_img = get_molecule_image(row['SMILES'])
+            if mol_img:
+                st.markdown(mol_img, unsafe_allow_html=True)
+            else:
+                st.info("Structure not available")
+        else:
+            st.info("SMILES not available")
+
+    with col2:
+        st.markdown(f"**{row.get('Name', 'N/A')}**")
+        atc_display = row.get(atc_code_col, 'N/A') if atc_code_col else row.get('ATC therapeutic group', 'N/A')
+        st.caption(f"ATC: {atc_display}")
+
+        param_col1, param_col2 = st.columns(2)
+
+        with param_col1:
+            st.caption("Predicted (Chemaxon)")
+            if pd.notna(row.get('pKa (basic)')):
+                st.write(f"**Basic pKa:** {float(row.get('pKa (basic)')):.2f}")
+            else:
+                st.markdown('<span style="color: red;">**Basic pKa:** —</span>', unsafe_allow_html=True)
+            if pd.notna(row.get('pKa (acidic)')):
+                st.write(f"**Acid pKa:** {float(row.get('pKa (acidic)')):.2f}")
+            else:
+                st.markdown('<span style="color: red;">**Acid pKa:** —</span>', unsafe_allow_html=True)
+            if pd.notna(row.get('logP (pred.)')):
+                st.write(f"**LogP:** {float(row.get('logP (pred.)')):.2f}")
+            else:
+                st.markdown('<span style="color: red;">**LogP:** —</span>', unsafe_allow_html=True)
+
+        with param_col2:
+            st.caption("Experimental (literature)")
+            if pd.notna(row.get('pKa (exp.)_1')):
+                st.write(f"**pKa (exp.) 1:** {float(row.get('pKa (exp.)_1')):.2f}")
+            else:
+                st.markdown('<span style="color: red;">**pKa (exp.) 1:** —</span>', unsafe_allow_html=True)
+            if pd.notna(row.get('pKa (exp.)_2')):
+                st.write(f"**pKa (exp.) 2:** {float(row.get('pKa (exp.)_2')):.2f}")
+            else:
+                st.markdown('<span style="color: red;">**pKa (exp.) 2:** —</span>', unsafe_allow_html=True)
+            if pd.notna(row.get('pKa_comment')):
+                st.write(f"**pKa comment:** {row['pKa_comment']}")
+            if pd.notna(row.get('logP (exp.)')):
+                st.write(f"**LogP (exp.):** {float(row.get('logP (exp.)')):.2f}")
+            else:
+                st.markdown('<span style="color: red;">**LogP (exp.):** —</span>', unsafe_allow_html=True)
+            if 'is_fluorescent' in row:
+                st.write(f"**Fluorescent:** {'✅ Yes' if row['is_fluorescent'] else '❌ No'}")
+            if 'Oral' in row:
+                if pd.notna(row.get('Oral')):
+                    st.write(f"**Oral:** {'✅ Yes' if row['Oral'] == 1.0 else '❌ No'}")
+                else:
+                    st.markdown('<span style="color: red;">**Oral:** —</span>', unsafe_allow_html=True)
+            if 'ABCB1_Pgp_CHEMBL' in row:
+                abcb1_label = format_abcb1_annotation(row.get('ABCB1_Pgp_CHEMBL'))
+                if abcb1_label:
+                    st.write(f"**ABCB1 (P-gp, ChEMBL):** {abcb1_label}")
+                else:
+                    st.markdown(
+                        '<span style="color: red;">**ABCB1 (P-gp, ChEMBL):** —</span>',
+                        unsafe_allow_html=True,
+                    )
+
+        lipinski_parts = []
+        if pd.notna(row.get('MW')):
+            lipinski_parts.append(f"MW: {float(row['MW']):.1f}")
+        if pd.notna(row.get('TPSA')):
+            lipinski_parts.append(f"TPSA: {float(row['TPSA']):.1f}")
+        if pd.notna(row.get('HBD')):
+            lipinski_parts.append(f"HBD: {int(row['HBD'])}")
+        if pd.notna(row.get('HBA')):
+            lipinski_parts.append(f"HBA: {int(row['HBA'])}")
+        if lipinski_parts:
+            st.caption(" · ".join(lipinski_parts))
+        if 'lipinski_violations' in row and pd.notna(row.get('lipinski_violations')):
+            violations = int(row['lipinski_violations'])
+            status = "✅ Lipinski-like" if violations <= 1 else f"⚠️ {violations} Ro5 violations"
+            st.caption(status)
+
+        if 'First approval (year)' in row and pd.notna(row['First approval (year)']):
+            st.caption(f"📅 Approved: {int(row['First approval (year)'])}")
+
+        if 'SMILES' in row and pd.notna(row['SMILES']):
+            with st.expander("🔬 SMILES and Identifiers"):
+                st.code(row['SMILES'])
+                if 'ChEMBL ID' in row and pd.notna(row['ChEMBL ID']):
+                    st.write(f"**ChEMBL ID:** {row['ChEMBL ID']}")
+                if 'DrugBank ID' in row and pd.notna(row['DrugBank ID']):
+                    st.write(f"**DrugBank ID:** {row['DrugBank ID']}")
+
+    st.divider()
 
 def get_molecule_image(smiles, size=(400, 400)):
     try:
@@ -444,35 +559,48 @@ def main():
                 lipinski_filters[col]['min'] = col_min
                 lipinski_filters[col]['max'] = col_max
     
-    filtered_df = df.copy()
-    
-    if is_experimental and enable_exp_pka_filter and exp_pka_cols:
-        has_exp_pka = pd.Series(False, index=filtered_df.index)
-        in_exp_pka_range = pd.Series(False, index=filtered_df.index)
-        for col in exp_pka_cols:
-            has_exp_pka |= filtered_df[col].notna()
-            in_exp_pka_range |= filtered_df[col].between(exp_pka_min, exp_pka_max)
-        filtered_df = filtered_df[~has_exp_pka | in_exp_pka_range]
+    st.markdown("### 🔎 Drug lookup")
+    search_query = st.text_input(
+        "Search by drug name, ChEMBL ID, or DrugBank ID",
+        placeholder="e.g. sunitinib, CHEMBL535, DB01268",
+        key="drug_lookup_search",
+        help="Case-insensitive substring match across name and identifier fields",
+    )
+
+    lookup_mode = bool(search_query.strip())
+    if lookup_mode:
+        filtered_df = search_drugs(df.copy(), search_query.strip())
     else:
-        if enable_bpka_filter and bpka_col in filtered_df.columns:
-            mask_bpka = filtered_df[bpka_col].isna() | filtered_df[bpka_col].between(basic_pka_min, basic_pka_max)
-            filtered_df = filtered_df[mask_bpka]
-        
-        if enable_apka_filter and apka_col in filtered_df.columns:
-            mask_apka = filtered_df[apka_col].isna() | filtered_df[apka_col].between(acid_pka_min, acid_pka_max)
-            filtered_df = filtered_df[mask_apka]
+        filtered_df = df.copy()
+
+    if not lookup_mode:
+        if is_experimental and enable_exp_pka_filter and exp_pka_cols:
+            has_exp_pka = pd.Series(False, index=filtered_df.index)
+            in_exp_pka_range = pd.Series(False, index=filtered_df.index)
+            for col in exp_pka_cols:
+                has_exp_pka |= filtered_df[col].notna()
+                in_exp_pka_range |= filtered_df[col].between(exp_pka_min, exp_pka_max)
+            filtered_df = filtered_df[~has_exp_pka | in_exp_pka_range]
+        else:
+            if enable_bpka_filter and bpka_col in filtered_df.columns:
+                mask_bpka = filtered_df[bpka_col].isna() | filtered_df[bpka_col].between(basic_pka_min, basic_pka_max)
+                filtered_df = filtered_df[mask_bpka]
+
+            if enable_apka_filter and apka_col in filtered_df.columns:
+                mask_apka = filtered_df[apka_col].isna() | filtered_df[apka_col].between(acid_pka_min, acid_pka_max)
+                filtered_df = filtered_df[mask_apka]
     
-    if enable_logp_filter and logp_col in filtered_df.columns:
+    if not lookup_mode and enable_logp_filter and logp_col in filtered_df.columns:
         mask_logp = filtered_df[logp_col].isna() | filtered_df[logp_col].between(logp_min, logp_max)
         filtered_df = filtered_df[mask_logp]
     
-    if 'is_fluorescent' in filtered_df.columns and fluorescence_filter != "All":
+    if not lookup_mode and 'is_fluorescent' in filtered_df.columns and fluorescence_filter != "All":
         if fluorescence_filter == "Fluorescent only":
             filtered_df = filtered_df[filtered_df['is_fluorescent'] == True]
         elif fluorescence_filter == "Non-fluorescent only":
             filtered_df = filtered_df[filtered_df['is_fluorescent'] == False]
     
-    if atc_code_col and atc_code_col in filtered_df.columns:
+    if not lookup_mode and atc_code_col and atc_code_col in filtered_df.columns:
         mask_atc = pd.Series([True] * len(filtered_df), index=filtered_df.index)
         
         if selected_l3:
@@ -492,17 +620,18 @@ def main():
         
         filtered_df = filtered_df[mask_atc]
     
-    if 'Oral' in filtered_df.columns and oral_only:
+    if not lookup_mode and 'Oral' in filtered_df.columns and oral_only:
         filtered_df = filtered_df[filtered_df['Oral'] == 1.0]
 
-    for col, settings in lipinski_filters.items():
-        filtered_df = apply_optional_range_filter(
-            filtered_df,
-            col,
-            settings['enabled'],
-            settings['min'],
-            settings['max'],
-        )
+    if not lookup_mode:
+        for col, settings in lipinski_filters.items():
+            filtered_df = apply_optional_range_filter(
+                filtered_df,
+                col,
+                settings['enabled'],
+                settings['min'],
+                settings['max'],
+            )
     
     exp_signal_cols = [
         col for col in ['pKa_comment']
@@ -547,106 +676,19 @@ def main():
     
     with tab1:
         st.subheader("Molecular Cards")
-        
+
+        if lookup_mode:
+            st.caption(f"Lookup matches for \"{search_query.strip()}\" (sidebar filters are bypassed)")
+
         if len(filtered_df) > 0:
             display_count = min(20, len(filtered_df))
-            
-            for idx in range(display_count):
-                row = filtered_df.iloc[idx]
-                
-                # Using container with fixed structure
-                with st.container():
-                    # Creating two columns with 1:2 ratio, responsive design
-                    col1, col2 = st.columns([1, 2], gap="medium")
-                    
-                    with col1:
-                        if 'SMILES' in row and pd.notna(row['SMILES']):
-                            mol_img = get_molecule_image(row['SMILES'])
-                            if mol_img:
-                                st.markdown(mol_img, unsafe_allow_html=True)
-                            else:
-                                st.info("Structure not available")
-                        else:
-                            st.info("SMILES not available")
-                    
-                    with col2:
-                        # Adding top margin for better alignment
-                        st.markdown(f"**{row.get('Name', 'N/A')}**")
-                        atc_display = row.get(atc_code_col, 'N/A') if atc_code_col else row.get('ATC therapeutic group', 'N/A')
-                        st.caption(f"ATC: {atc_display}")
-                        
-                        param_col1, param_col2 = st.columns(2)
-                        
-                        with param_col1:
-                            st.caption("Predicted (Chemaxon)")
-                            if pd.notna(row.get('pKa (basic)')):
-                                st.write(f"**Basic pKa:** {float(row.get('pKa (basic)')):.2f}")
-                            else:
-                                st.markdown('<span style="color: red;">**Basic pKa:** —</span>', unsafe_allow_html=True)
-                            if pd.notna(row.get('pKa (acidic)')):
-                                st.write(f"**Acid pKa:** {float(row.get('pKa (acidic)')):.2f}")
-                            else:
-                                st.markdown('<span style="color: red;">**Acid pKa:** —</span>', unsafe_allow_html=True)
-                            if pd.notna(row.get('logP (pred.)')):
-                                st.write(f"**LogP:** {float(row.get('logP (pred.)')):.2f}")
-                            else:
-                                st.markdown('<span style="color: red;">**LogP:** —</span>', unsafe_allow_html=True)
-                        
-                        with param_col2:
-                            st.caption("Experimental (literature)")
-                            if pd.notna(row.get('pKa (exp.)_1')):
-                                st.write(f"**pKa (exp.) 1:** {float(row.get('pKa (exp.)_1')):.2f}")
-                            else:
-                                st.markdown('<span style="color: red;">**pKa (exp.) 1:** —</span>', unsafe_allow_html=True)
-                            if pd.notna(row.get('pKa (exp.)_2')):
-                                st.write(f"**pKa (exp.) 2:** {float(row.get('pKa (exp.)_2')):.2f}")
-                            else:
-                                st.markdown('<span style="color: red;">**pKa (exp.) 2:** —</span>', unsafe_allow_html=True)
-                            if pd.notna(row.get('pKa_comment')):
-                                st.write(f"**pKa comment:** {row['pKa_comment']}")
-                            if pd.notna(row.get('logP (exp.)')):
-                                st.write(f"**LogP (exp.):** {float(row.get('logP (exp.)')):.2f}")
-                            else:
-                                st.markdown('<span style="color: red;">**LogP (exp.):** —</span>', unsafe_allow_html=True)
-                            if 'is_fluorescent' in row:
-                                st.write(f"**Fluorescent:** {'✅ Yes' if row['is_fluorescent'] else '❌ No'}")
-                            if 'Oral' in row:
-                                if pd.notna(row.get('Oral')):
-                                    st.write(f"**Oral:** {'✅ Yes' if row['Oral'] == 1.0 else '❌ No'}")
-                                else:
-                                    st.markdown('<span style="color: red;">**Oral:** —</span>', unsafe_allow_html=True)
-                        
-                        lipinski_parts = []
-                        if pd.notna(row.get('MW')):
-                            lipinski_parts.append(f"MW: {float(row['MW']):.1f}")
-                        if pd.notna(row.get('TPSA')):
-                            lipinski_parts.append(f"TPSA: {float(row['TPSA']):.1f}")
-                        if pd.notna(row.get('HBD')):
-                            lipinski_parts.append(f"HBD: {int(row['HBD'])}")
-                        if pd.notna(row.get('HBA')):
-                            lipinski_parts.append(f"HBA: {int(row['HBA'])}")
-                        if lipinski_parts:
-                            st.caption(" · ".join(lipinski_parts))
-                        if 'lipinski_violations' in row and pd.notna(row.get('lipinski_violations')):
-                            violations = int(row['lipinski_violations'])
-                            status = "✅ Lipinski-like" if violations <= 1 else f"⚠️ {violations} Ro5 violations"
-                            st.caption(status)
 
-                        if 'First approval (year)' in row and pd.notna(row['First approval (year)']):
-                            st.caption(f"📅 Approved: {int(row['First approval (year)'])}")
-                        
-                        if 'SMILES' in row and pd.notna(row['SMILES']):
-                            with st.expander("🔬 SMILES and Identifiers"):
-                                st.code(row['SMILES'])
-                                if 'ChEMBL ID' in row and pd.notna(row['ChEMBL ID']):
-                                    st.write(f"**ChEMBL ID:** {row['ChEMBL ID']}")
-                                if 'DrugBank ID' in row and pd.notna(row['DrugBank ID']):
-                                    st.write(f"**DrugBank ID:** {row['DrugBank ID']}")
-                    
-                    st.divider()
-            
-            if len(filtered_df) > 10:
-                st.info(f"Showing first 20 of {len(filtered_df)} molecules. Use the table to view all.")
+            for idx in range(display_count):
+                with st.container():
+                    render_drug_card(filtered_df.iloc[idx], atc_code_col)
+
+            if len(filtered_df) > display_count:
+                st.info(f"Showing first {display_count} of {len(filtered_df)} molecules. Use the table to view all.")
             
             st.markdown(get_download_link(filtered_df), unsafe_allow_html=True)
         else:

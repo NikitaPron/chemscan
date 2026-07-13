@@ -17,6 +17,46 @@
 - ✅ Molecular structure visualization (RDKit)
 - ✅ CSV export of results
 - ✅ Interactive histograms and statistics
+- ✅ Drug lookup by name, ChEMBL ID, or DrugBank ID
+
+## 📦 Dataset (`table_drugs.csv`)
+
+The ChemScan database contains **2,063 unique approved small-molecule drugs** assembled from public **ChEMBL** and **DrugBank** snapshots (retrieved February 2026).
+
+### Inclusion criteria
+
+- Regulatory approval in at least one major jurisdiction (`max_phase = 4` in ChEMBL; approved annotation in DrugBank)
+- Valid canonical **SMILES** string (entries without SMILES or with unparseable structures were excluded)
+- Deduplication by canonical SMILES
+
+### Descriptor calculation
+
+| Field | Source / method |
+|-------|-----------------|
+| Basic and acidic pKa (predicted) | ChemAxon Marvin |
+| logP, MW, TPSA, HBD, HBA (predicted) | RDKit |
+| pKa, logP (experimental) | ChEMBL / DrugBank annotations where available |
+| DyeLeS score | Pre-computed fluorescence-likelihood metric |
+| `ABCB1_Pgp_CHEMBL` | Curated ChEMBL bioactivity records against human ABCB1 (CHEMBL4302) |
+| ATC codes, oral flag, first-approval year | Repository metadata |
+
+Experimental coverage in the current snapshot: predicted basic pKa and logP for all retained compounds; experimental pKa for ~21% and experimental logP for ~52% of entries.
+
+### Regenerating annotations
+
+```bash
+# Fetch ABCB1 (P-gp) annotations from ChEMBL API
+python scripts/fetch_abcb1_chembl.py
+```
+
+The main screening table is `table_drugs.csv` in the project root. The Streamlit app loads this file at startup.
+
+### Recent platform updates (post peer review)
+
+- Optional **Lipinski-like filters** in the sidebar (MW, predicted logP, HBD, HBA, TPSA; off by default)
+- **ABCB1_Pgp_CHEMBL** annotations shown verbatim on each drug card
+- **Drug lookup** by name, ChEMBL ID, or DrugBank ID (single search field)
+- Lipinski descriptor panels in the **Statistics** tab and additional columns in the **Table** export
 
 ## 🚀 Quick Start
 
